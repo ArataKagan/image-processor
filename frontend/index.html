@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Image Processor</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 60px auto; padding: 0 16px; color: #111; }
+    h1 { font-size: 1.5rem; margin-bottom: 24px; }
+    label { display: block; font-weight: 600; margin-bottom: 6px; }
+    input[type="file"], select, input[type="number"] { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 6px; margin-bottom: 14px; }
+    #resize-fields { display: none; }
+    button { padding: 10px 22px; background: #2563eb; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #status-box { margin-top: 24px; padding: 14px; border-radius: 6px; background: #f3f4f6; display: none; }
+    #status-box.error { background: #fee2e2; }
+    #status-box.completed { background: #dcfce7; }
+    #download-link { display: none; margin-top: 14px; }
+    #download-link a { color: #2563eb; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>Image Processor</h1>
+  <form id="upload-form">
+    <label for="image">Image (JPG, PNG, WebP — max 10 MB)</label>
+    <input type="file" id="image" name="image" accept="image/jpeg,image/png,image/webp" required />
+
+    <label for="task">Task</label>
+    <select id="task" name="task">
+      <option value="grayscale">Grayscale</option>
+      <option value="resize">Resize</option>
+    </select>
+
+    <div id="resize-fields">
+      <label for="width">Width (px)</label>
+      <input type="number" id="width" name="width" min="1" max="10000" placeholder="e.g. 800" />
+      <label for="height">Height (px)</label>
+      <input type="number" id="height" name="height" min="1" max="10000" placeholder="e.g. 600" />
+    </div>
+
+    <button type="submit" id="submit-btn">Upload &amp; Process</button>
+  </form>
+
+  <div id="status-box">
+    <strong>Status:</strong> <span id="status-text"></span>
+  </div>
+  <div id="download-link">
+    <a id="dl-anchor" href="#">Download processed image</a>
+  </div>
+
+  <script>
+    const API = '/api';
+    const taskSelect = document.getElementById('task');
+    const resizeFields = document.getElementById('resize-fields');
+    taskSelect.addEventListener('change', () => {
+      resizeFields.style.display = taskSelect.value === 'resize' ? 'block' : 'none';
+    });
+
+    const form = document.getElementById('upload-form');
+    const submitBtn = document.getElementById('submit-btn');
+    const statusBox = document.getElementById('status-box');
+    const statusText = document.getElementById('status-text');
+    const downloadLink = document.getElementById('download-link');
+    const dlAnchor = document.getElementById('dl-anchor');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      statusBox.style.display = 'none';
+      statusBox.className = '';
+      downloadLink.style.display = 'none';
+      submitBtn.disabled = true;
+
+      const fd = new FormData(form);
+
+      try {
+        const res = await fetch(`${API}/upload`, { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Upload failed');
+
+        showStatus('PENDING');
+        await pollStatus(data.taskId);
+      } catch (err) {
+        showStatus('ERROR: ' + err.message, true);
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+
+    function showStatus(text, isError = false) {
+      statusBox.style.display = 'block';
+      statusBox.className = isError ? 'error' : '';
+      statusText.textContent = text;
+    }
+
+    async function pollStatus(taskId) {
+      const interval = setInterval(async () => {
+        try {
+          const res = await fetch(`${API}/tasks/${taskId}`);
+          const task = await res.json();
+          if (!res.ok) { clearInterval(interval); showStatus('Error fetching status', true); return; }
+
+          showStatus(task.status);
+          statusBox.className = task.status === 'COMPLETED' ? 'completed' : task.status === 'FAILED' ? 'error' : '';
+
+          if (task.status === 'COMPLETED') {
+            clearInterval(interval);
+            dlAnchor.href = `${API}/download/${taskId}`;
+            dlAnchor.download = `processed-${taskId}`;
+            downloadLink.style.display = 'block';
+          } else if (task.status === 'FAILED') {
+            clearInterval(interval);
+            showStatus('FAILED: ' + (task.errorMessage || 'Unknown error'), true);
+          }
+        } catch {
+          clearInterval(interval);
+          showStatus('Network error while polling', true);
+        }
+      }, 1500);
+    }
+  </script>
+</body>
+</html>
