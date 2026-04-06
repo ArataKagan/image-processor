@@ -3,6 +3,7 @@ WORKDIR /app
 COPY prisma/ ./prisma/
 COPY gateway/package*.json ./gateway/
 RUN cd gateway && npm ci
+
 RUN cd gateway && npx prisma generate
 COPY gateway/ ./gateway/
 RUN cd gateway && npm run build
